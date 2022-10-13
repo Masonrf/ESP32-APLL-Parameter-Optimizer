@@ -8,7 +8,7 @@ f_desired = 49.152E6
 # Crystal oscillator frequency
 f_xtal = 40E6
 
-from multiprocessing import Pool, Lock, Manager
+from multiprocessing import Pool, Manager
 
 # Class to store parameters
 class APLL_Param():
@@ -19,6 +19,7 @@ class APLL_Param():
         self.odiv = odiv
         self.f_out = self.calculate_Fout(f_xtal)
     
+    # Equation from technical docs listed above
     def calculate_Fout(self, f_xtal):
         return (f_xtal * (self.sdm2 + self.sdm1/(2**8) + self.sdm0/(2**16) + 4))/(2 * (self.odiv + 2))
 
@@ -29,7 +30,8 @@ def threadTask(printLock, extendLock, results, sdm0):
     
     tmpResults = []
 
-    for sdm1 in range (256):
+    # Range is 0 ~ N+1
+    for sdm1 in range(256):
         for sdm2 in range(64):
             for odiv in range(32):
                 param = APLL_Param(f_xtal, sdm0, sdm1, sdm2, odiv)
@@ -38,7 +40,8 @@ def threadTask(printLock, extendLock, results, sdm0):
                     tmpResults.append(param)
 
     with extendLock:
-        results.extend(tmpResults)
+        # Extend with closest value in sdm0
+        results.append(min(tmpResults, key=lambda tmpResults:abs(tmpResults.f_out - f_desired)))
 
 # Error callback function
 def custom_error_callback(error):
@@ -56,7 +59,7 @@ if __name__ == '__main__':
             poolDone.wait()
             print("Finished calculating.")
 
-        print("Finding closest value (This may take some time)...")
+        print("Finding closest value.")
         closest = min(results, key=lambda results:abs(results.f_out - f_desired))
         
         print("\n-------- [Results] --------")
