@@ -8,7 +8,9 @@ f_desired = 49.152E6
 # Crystal oscillator frequency
 f_xtal = 40E6
 
+from multiprocessing import Pool, Lock, Manager
 
+# Class to store parameters
 class APLL_Param():
     def __init__(self, f_xtal, sdm0, sdm1, sdm2, odiv):
         self.sdm0 = sdm0
@@ -20,27 +22,48 @@ class APLL_Param():
     def calculate_Fout(self, f_xtal):
         return (f_xtal * (self.sdm2 + self.sdm1/(2**8) + self.sdm0/(2**16) + 4))/(2 * (self.odiv + 2))
 
+# Task for each thread
+def threadTask(printLock, extendLock, results, sdm0):
+    with printLock:
+        print("Start thread sdm0: ", sdm0)
+    
+    tmpResults = []
 
-results = []
-
-# Ranges 0 ~ N so to include ending value, range(N+1)
-for sdm0 in range(255+1):
-    if (sdm0 % 5 == 0):
-        print("On sdm0 = ", sdm0)
-
-    for sdm1 in range (255+1):
-        for sdm2 in range(63+1):
-            for odiv in range(31+1):
+    for sdm1 in range (256):
+        for sdm2 in range(64):
+            for odiv in range(32):
                 param = APLL_Param(f_xtal, sdm0, sdm1, sdm2, odiv)
-                # Only append if within 2.5% of desired value to reduce RAM usage
-                if 0.975 < (param.f_out / f_desired) < 1.025:
-                    results.append(param)
+                # Only append if within 1% of desired value to reduce RAM usage and CPU overhead later on
+                if 0.99 < (param.f_out / f_desired) < 1.01:
+                    tmpResults.append(param)
 
-closest = min(results, key=lambda results:abs(results.f_out - f_desired))
-print("Xtal Freq: ", f_xtal)
-print("Desired Freq: ", f_desired)
-print("Output Freq: ", closest.f_out)
-print("sdm0: ", closest.sdm0)
-print("sdm1: ", closest.sdm1)
-print("sdm2: ", closest.sdm2)
-print("odiv: ", closest.odiv)
+    with extendLock:
+        results.extend(tmpResults)
+
+# Error callback function
+def custom_error_callback(error):
+    print(error, flush=True)
+
+if __name__ == '__main__':
+
+    with Manager() as manager:
+        extendLock = manager.Lock()
+        printLock = manager.Lock()
+        results = manager.list()
+
+        with Pool() as p:
+            poolDone = p.starmap_async(threadTask, [(printLock, extendLock, results, i) for i in range(256)], error_callback=custom_error_callback)
+            poolDone.wait()
+            print("Finished calculating.")
+
+        print("Finding closest value (This may take some time)...")
+        closest = min(results, key=lambda results:abs(results.f_out - f_desired))
+        
+        print("\n-------- [Results] --------")
+        print("Xtal Freq [Hz]:    ", f'{f_xtal:,}')
+        print("Desired Freq [Hz]: ", f'{f_desired:,}')
+        print("Output Freq [Hz]:  ", f'{closest.f_out:,}')
+        print("sdm0: ", closest.sdm0)
+        print("sdm1: ", closest.sdm1)
+        print("sdm2: ", closest.sdm2)
+        print("odiv: ", closest.odiv)
